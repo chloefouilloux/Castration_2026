@@ -1,0 +1,1080 @@
+---
+title: "Gravid_Females_Castration"
+output:
+  html_document: default
+  pdf_document: default
+date: "2025-02-12"
+---
+#Libraries
+```{r Lets load some libraries!}
+#Libraries
+library(ggplot2)
+library(tidyverse)
+library(dplyr)
+library(readr)
+library(forcats)
+library(ggrepel)
+library(ggpubr)
+library(gghalves)
+library(stringr)
+library(patchwork)
+
+#For models
+library(DHARMa)
+library(glmmTMB)
+
+```
+
+Set theme for ggplot
+```{r Themes}
+#Theme set
+theme_set(  theme(legend.position = "none",
+                  strip.background = element_rect(fill = "White"),
+                  panel.background = element_rect(fill = "white",
+                                                  colour = "black"), 
+                  panel.grid.major = element_blank(), 
+                  panel.grid.minor = element_blank(), 
+                  strip.text = element_text(size = 15),
+                    axis.text.y = element_text(size = 15),
+                    axis.text.x = element_text(size = 15),
+                    axis.title.x = element_text(size = 18),
+                    axis.title.y = element_text(size = 18, angle =90, 
+                                                margin = margin(r = 15)),
+                    strip.text.x = element_text(margin = margin(0.25,0,0.25,0, "cm")))) 
+
+##TREATMENT COLOURS
+
+treatment_cols <- c(
+  "UNEX"     = "#6B7280",
+  "INF"      = "#8C2F39",
+  "EXP_KJER" = "#2F6F6B",
+  "EXP_MER"  = "#9FD6CC")
+
+treatment_cols_gross <- c(
+  "UNEX"     = "#6B7280",
+  "INF"      = "#8C2F39",
+  "EXP"  = "#9FD6CC")
+
+
+```
+
+Loading the raw data
+```{r Raw Data Files}
+
+grav_all <- read_csv("grav_all1.csv")
+
+```
+
+# Future things (with more data once experiment concluded)
++ Longevity
++ Infection susceptibilitY
++Proportion survival (nauplii/eggs)
+
+```{r Data joining + More Tidying}
+
+####################################
+####################################
+#### to avoid pseudo-replication ####
+grav_byfemale <- grav_all %>%
+              group_by(ID, Strain) %>%
+               summarise( PostTreat_Eggs_Ind = sum(Clutch_Tot[Clutch_Num != 1], 
+                                                          na.rm = TRUE),
+                                PostTreat_Nauplii_Ind = sum(Maximum_Dens[Clutch_Num != 1], 
+                                                            na.rm = TRUE),
+                    
+                               Oldest_nonzero_F1_minusfirst =  ifelse(
+                                  all(Maximum_Dens[Clutch_Num != 1] <= 0 | 
+                                      is.na(Maximum_Dens[Clutch_Num != 1])),0,
+                                  as.numeric(  max(DOB[Clutch_Num != 1 & Maximum_Dens > 0],
+                                                   na.rm = TRUE) -  Date_Iso ) ),
+                               
+                        max_clutches = max(Clutch_Num),
+                        Treatment_Fine = first(Treatment_Fine),
+                        Stock = first(Stock),
+                        Infection_Status = first(Infection_Status)) %>%
+                        ungroup() 
+
+# 1) Universe of females (keeps those with only clutch 1)
+grav_byfemale %>%
+        distinct(ID, Treatment_Fine) %>%
+        group_by(Treatment_Fine) %>%
+        summarise(n = n())
+
+```
+
+
+#############################
+## TAKING A LOOK INTO EGGS! ##
+#############################
+Are we even across clutches?
+We do not find singificant differences in the clutch size at time of isolation between experimental treatments 
+```{r Isolation: Experimental treamtments Clutch Numbers}
+
+grav_all %>%
+    filter(Clutch_Num == 1) %>%
+   # group_by(Infection_Status) %>%
+    summarise(mean_1 = mean(Clutch_Tot)) 
+
+grav_all %>%
+    #filter(Clutch_Num == 1) %>%
+    group_by(Infection_Status) %>%
+    summarise(mean_age = mean(age_post_iso, na.rm = T)) 
+
+grav_byfemale %>%
+    #filter(Clutch_Num == 1) %>%
+    group_by(Infection_Status) %>%
+    summarise(mean_max = mean(max_clutches)) 
+
+```
+
+Is it castration?
+```{r Castration Numbers}
+
+#COMBINE EFFORTS OF ALL FEMALES within each treatment
+grav_byfemale %>%
+  group_by(Treatment_Fine) %>%
+  summarise(total_nauplii = sum(PostTreat_Nauplii_Ind, na.rm = TRUE)) %>%
+  ggplot(aes(x = Treatment_Fine, y = total_nauplii)) +
+  geom_col(fill = "grey70", width = 0.6) +
+  geom_text(aes(label = total_nauplii)) +
+  labs(y = "Total nauplii hatched (count, post-treatment, all females)", 
+       x = "")
+
+```
+
+Very exciting developments, so here are the clutch numbers which are the numbers of eggs in each clutch (which we counted individually for each side!). Be mindful I often subtract the first clutch away from visualizations/models -- this is because this is the clutch when the female was **isolated** before we applied any treatments. So it does not reflect our experiment. 
+
+```{r Clutch Numbers + Symm. Visualization }
+
+#####
+#Clutch numbers across time
+#####
+
+grav_all %>%
+  group_by(Infection_Status, Clutch_Num) %>%
+  mutate( mean_eggs_exp_clutch = mean(Clutch_Tot)) %>%
+  ggplot(aes(x = Clutch_Num, y = Clutch_Tot, 
+             colour = Infection_Status)) +
+    annotate(geom = "rect", alpha = 0.3,
+            fill = "lightblue",
+           xmin = -Inf, xmax = 1.5, 
+           ymin = -Inf, ymax = Inf)+
+  geom_jitter(height = 0, width = 0.00, size = 3,
+              alpha = 0.3)+
+  
+  facet_wrap(~  Infection_Status )+ #Strain +
+geom_point(aes(x = Clutch_Num, y = mean_eggs_exp_clutch),
+             size = 3)+
+  stat_summary(geom = "pointrange", 
+               fun.data = mean_cl_boot,
+               colour = "black")+
+ geom_line(aes(x = Clutch_Num, 
+                y = mean_eggs_exp_clutch, 
+                group = 1), 
+            colour = "black", 
+            linetype = "dashed") +
+  xlab("Clutch number (n+1)")+
+  ylab("Total eggs per clutch (count)") +
+  scale_x_continuous(breaks = seq(0, 14, by = 2))+
+  scale_color_manual(values = treatment_cols_gross)
+
+
+
+#Let's get this all leveled up in a cute way
+grav_all$Treatment_Fine <- fct_relevel(grav_all$Treatment_Fine, c("UNEX", "INF"))
+  
+grav_all %>%
+  group_by(Treatment_Fine, Clutch_Num) %>%
+  mutate( mean_eggs_exp_clutch = mean(Clutch_Tot)) %>%
+  ggplot(aes(x = Clutch_Num, y = Clutch_Tot, 
+             colour = Treatment_Fine)) +
+    annotate(geom = "rect", alpha = 0.3,
+            fill = "lightblue",
+           xmin = -Inf, xmax = 1.5, 
+           ymin = -Inf, ymax = Inf)+
+  geom_jitter(height = 0, width = 0.00, size = 3,
+              alpha = 0.3)+
+  
+  facet_wrap(~  Treatment_Fine )+ #Strain +
+geom_point(aes(x = Clutch_Num, y = mean_eggs_exp_clutch),
+             size = 3)+
+  stat_summary(geom = "pointrange", 
+               fun.data = mean_cl_boot,
+               colour = "black")+
+ geom_line(aes(x = Clutch_Num, 
+                y = mean_eggs_exp_clutch, 
+                group = 1), 
+            colour = "black", 
+            linetype = "dashed") +
+  xlab("Clutch number (n+1)")+
+  ylab("Total eggs per clutch (count)") +
+  scale_x_continuous(breaks = seq(0, 14, by = 2))+
+  scale_color_manual(values = treatment_cols)
+
+A<- 
+  grav_all %>%
+  filter(!Treatment_Fine %in% c("UNEX", "INF")) %>%
+  #group_by(Clutch_Num, Treatment_Fine) %>%
+  #filter(n() > 1) %>%        # <- drop singleton clutches
+  #ungroup() %>%
+  ggplot(aes(x = as.factor(Clutch_Num), y = Clutch_Tot, 
+             colour = Treatment_Fine)) +
+  annotate(geom = "rect", alpha = 0.3,
+            fill = "lightblue",
+           xmin = -Inf, xmax = 1.25, 
+           ymin = -Inf, ymax = Inf)+
+ # geom_point(size = 2.5, alpha = 0.4)+
+stat_smooth(method = "gam", 
+              aes(group = Treatment_Fine),
+              fullrange = F, 
+              se = F,
+              fill = "lightgrey",
+              formula = y ~ s(x, bs = "cr", k = 5))+
+    stat_summary(fun.data = mean_cl_boot,
+                 shape = 21, size = 0.7, 
+                 fill = "white",
+               aes(group =Treatment_Fine),
+               geom= "pointrange")+
+    theme(axis.text.y = element_text(size = 22),
+          axis.text.x = element_text(size = 22)) +
+  labs( x = "", 
+        y = "") +
+  scale_color_manual(values =  c( "#2F6F6B","#9FD6CC")) 
+
+A
+
+ggsave("EXP_eggs.png", A, width = 6, height = 8, units = "in" )
+
+#####
+#Clutch symmetry
+#####
+
+# Plot
+grav_all %>%
+  ggplot(aes(x = factor(Clutch_Num), y = Clutch_Sym, 
+             fill = Infection_Status)) +
+
+  geom_boxplot(width = 0.3, outlier.shape = NA, alpha = 0.7) + 
+  #geom_jitter(width = 0.1, size = 2, alpha = 0.5) +  # Raw data points
+  geom_hline(yintercept = 1, linetype = "dashed", color = "black") +
+  facet_wrap(~Infection_Status) +
+  xlab("Clutch Number (n+1)") +
+  ylab("Clutch Symmetry") +
+  scale_fill_manual(values = treatment_cols_gross)
+
+grav_all %>%
+  ggplot(aes(x = Clutch_Est_L, 
+             y = Clutch_Est_R, 
+             color = Infection_Status)) +
+  geom_abline(slope = 1, 
+              intercept = 0, linetype = "dashed", 
+              color = "black") +
+  geom_point(alpha = 0.7, size = 3) +
+  facet_wrap(~Infection_Status ) + #+ Clutch_Num
+  xlab("Left Clutch Size") +
+  ylab("Right Clutch Size") +
+  scale_color_manual(values = treatment_cols_gross) 
+  
+  
+#####
+#Lifetime Clutch Production
+#####
+grav_all <- grav_all%>%
+  mutate( Strain = fct_explicit_na(Strain, na_level = "None"),
+          Strain = fct_recode(Strain, "Local" = "MER", "Foreign" = "KJER"),
+          Strain = fct_relevel(Strain, c("None", "MER")))
+
+
+grav_all %>%
+  ggplot(aes(x = Infection_Status, y = PostTreat_Eggs_Ind, 
+             colour = Treatment_Fine)) +
+  geom_jitter(height = 0, width = 0.1, 
+              size = 4, alpha = 0.3) +
+  stat_summary(fun.data = mean_cl_boot, colour = "black", 
+               shape = 21, size = 1, stroke =1.5,
+               fill = "white") +
+  facet_wrap(~Strain, scales = "free_x")+
+  scale_color_manual(values = treatment_cols) +
+  labs(x = "", 
+       y = "Individual lifetime egg production
+  (count; -1st clutch)") +
+  theme(strip.text = element_text(size = 15),
+        axis.text.y = element_text(size = 15),
+        axis.text.x = element_text(size = 15),
+        axis.title.y = element_text(size = 18, angle =90, margin = margin(r = 15)),
+        strip.text.x = element_text(margin = margin(0.25,0,0.25,0, "cm"))) 
+  
+  
+```
+
+```{r Clutch Numbers Models}
+
+#################
+## Total eggs per clutch #
+#################
+
+#1. Clutch size decreases across time
+
+#grav_all is not stable, neither is grav
+grav_all$Treatment_Fine <- fct_relevel(grav_all$Treatment_Fine, "UNEX") #"EXP_MER"
+
+
+#okay, so i don't want to include the first clutch, but then all the females that do not even make another clutch are not counted?
+m1 <- 
+  grav_all %>%
+  filter(!Clutch_Num == 1) %>% 
+  #do not include first clutch; pre-treatment
+  glmmTMB(Clutch_Tot ~ Clutch_Num * Treatment_Fine + 
+                            #Clutch_Sym + 
+                            Time_Between_Clutches+
+                            (1| Stock) + (1|ID),
+   #[add age at clutch number] 
+              dispformula = ~ 1,
+              ziformula = ~ 1,
+              family = nbinom1, #nbinom1, poisson, nbinom2
+              data = .)
+
+simusimulationOutput <- simulateResiduals(fittedModel = m1, plot = T)
+summary(m1)
+
+m1.0 <- 
+  grav_all %>%
+  filter(!Clutch_Num == 1) %>% 
+  #do not include first clutch; pre-treatment
+  glmmTMB(Clutch_Tot ~ Clutch_Num * Treatment_Fine + 
+                            #Clutch_Sym + 
+                            Time_Between_Clutches+
+                            (1| Stock) + (1|ID),
+   #[add age at clutch number] 
+              dispformula = ~  Clutch_Num,
+              #ziformula = ~ Clutch_Num ,
+              family = nbinom1, #nbinom1, poisson, nbinom2
+              data = .)
+
+
+simusimulationOutput <- simulateResiduals(fittedModel = m1, plot = T)
+summary(m1)
+testDispersion(m1)
+
+
+#################
+## Lifetime egg production #
+#################
+
+## HERE WE NEED 1 LINE PER FEMALE. THIS IS PSEUDO REPLICATION.
+
+grav_byfemale$Treatment_Fine <- fct_relevel(grav_byfemale$Treatment_Fine, 
+               "UNEX") #"EXP_MER", EXP_KJER"
+
+#both of these are fine
+
+m2 <- glmmTMB(PostTreat_Eggs_Ind ~ Treatment_Fine + (1| Stock), 
+             # dispformula = ~ 1 ,
+              family = nbinom1, 
+              data = grav_byfemale)
+
+summary(m2)
+simusimulationOutput <- simulateResiduals(fittedModel = m2, plot = T)
+testDispersion(m2)
+testZeroInflation(m2)
+
+
+#################
+## Number of clutches #
+#################
+
+m3<- glmmTMB(max_clutches ~ Treatment_Fine + (1| Stock), 
+             dispformula = ~ 1 ,
+             #ziformula = ~ Treatment_Fine,
+              family = poisson, #nbinom1, nbinom2, poisson
+              data = grav_byfemale)
+
+summary(m3)
+simusimulationOutput <- simulateResiduals(fittedModel = m3, plot = T)
+testDispersion(m3)
+grav_byfemale %>%
+        group_by(Treatment_Fine) %>%
+        summarize(mean_clutches = mean(max_clutches-1), #remove isolation clutch
+                  se_clutches = sd(max_clutches-1, na.rm = T)/sqrt(n())) %>%
+        ungroup()
+
+```
+
+#Clutch Timing
+Questions: 
+
+1. How long are females holding onto their clutches? Here we can think about the cost of carrying these enomours things around, potential predation. We can also think about total output-- fast these guys hatch, faster she can churn out another clutch.
+
+2. Time between clutches. Here I would hypothesize that it would take more and more time to generate clutches, as females are getting older, and this is quite a costly endeavor.
+
+#How long/How many clutches does stored sperm fertilize?
+
+```{r Timing of Clutches (inter-intra) + Survival }
+
+#Holding time and inter-clutch intervals are averaged within females prior to treatment-level summaries to avoid pseudoreplication arising from repeated clutches per individual.
+
+per_female_timing <- grav_all %>%
+                      group_by(Treatment_Fine, ID, Stock) %>%
+                      summarise(
+                        max_clutches = max(Clutch_Num, na.rm = T),
+                        mean_holding_time = mean(Holding_Time, na.rm = TRUE),
+                        mean_time_between = mean(Time_Between_Clutches, na.rm = TRUE),
+                        max_age_f1 = max(Oldest_nonzero_F1_minusfirst, na.rm = T), 
+                        #age when they had last viable egg
+                        max_age = max(age_post_iso, na.rm = T),  #age of mum
+                        .groups = "drop" ) %>%
+                        filter(is.finite(max_age_f1), 
+                               is.finite(max_age))
+
+#Now bring it all together
+
+per_treatment_timing <- per_female_timing %>%
+                    group_by(Treatment_Fine) %>%
+                    summarise(
+                      n_females = n(),
+                      #time holding a single clutch
+                      Average_Holding_Time = mean(mean_holding_time, na.rm = TRUE),
+                      Median_Holding_Time  = median(mean_holding_time, na.rm = TRUE),
+                      se_Holding_Time      = sd(mean_holding_time, na.rm = TRUE) / sqrt(n_females),
+                      
+                      #time between clutches
+                      Average_Time_Between_Clutches = mean(mean_time_between, na.rm = TRUE),
+                      Median_Time_Between_Clutches  = median(mean_time_between, na.rm = TRUE),
+                      se_timebtwn = sd(mean_time_between, na.rm = TRUE) / sqrt(n_females),
+                  
+                      #Age related
+                       mean_max_age_f1 = mean(max_age_f1, na.rm = T), 
+                       se_f1 = sd(max_age_f1, na.rm = TRUE) / sqrt(n_females),
+                  
+                       mean_max_age = mean(max_age , na.rm = T),
+                       se_age = sd(max_age , na.rm = TRUE) / sqrt(n_females),
+                      .groups = "drop" )
+
+per_treatment_timing$Treatment_Fine <- fct_relevel(per_treatment_timing$Treatment_Fine, 
+                                                   c("UNEX", "EXP_KJER", "EXP_MER"))
+
+############# #############
+## Plots ## Plots ## Plots
+############# #############
+
+A<- 
+  ggplot(per_treatment_timing, aes(x = Treatment_Fine, y = Average_Holding_Time)) +
+  geom_hline(yintercept = c(1, 3, 5), linetype = "dashed", 
+                    colour = "grey", size = 0.4) +
+  geom_errorbar(aes( ymin = Average_Holding_Time - se_Holding_Time,
+                ymax = Average_Holding_Time + se_Holding_Time), width = 0.2) +
+  geom_point(size = 6, aes(fill = Treatment_Fine), shape = 21) +
+  labs(y = "Intra-clutch time 
+(days female holds a clutch)", x = "") +
+  scale_fill_manual(values = treatment_cols)
+
+B<- 
+  ggplot(per_treatment_timing, aes(x = Treatment_Fine, y = Average_Time_Between_Clutches)) +
+            geom_hline(yintercept = c(1, 3, 5, 7), linetype = "dashed", 
+                    colour = "grey", size = 0.4) +
+  geom_errorbar(aes( ymin = Average_Time_Between_Clutches -  se_timebtwn,
+                ymax = Average_Time_Between_Clutches +  se_timebtwn), width = 0.2) +
+  geom_point(size = 6, aes(fill = Treatment_Fine), shape = 21) +
+  labs(y = "Inter-clutch time
+(days between clutches)", x = "") +
+  scale_fill_manual(values = treatment_cols)
+
+
+C<- 
+  ggplot(per_treatment_timing, aes(x = Treatment_Fine, y = mean_max_age_f1)) +
+        geom_errorbar(aes( ymin = mean_max_age_f1 -  se_f1,
+                        ymax = mean_max_age_f1 +  se_f1), width = 0.2) +
+        geom_hline(yintercept = c(7, 14, 21, 30), linetype = "dashed", 
+                    colour = "grey", size = 0.4) +
+          geom_point(size = 6, aes(fill = Treatment_Fine), shape = 21) +
+          labs(y = "Oldest age at which 
+female had viable F1 (days)", x = "") +
+          scale_fill_manual(values = treatment_cols)
+
+
+D<- 
+  ggplot(per_treatment_timing, aes(x = Treatment_Fine, y = mean_max_age)) +
+        geom_errorbar(aes( ymin = mean_max_age -  se_age,
+                        ymax = mean_max_age +  se_age), width = 0.2) +
+          geom_point(size = 6, aes(fill = Treatment_Fine), shape = 21) +
+         geom_hline(yintercept = c(30, 60, 90), linetype = "dashed", 
+                    colour = "grey", size = 0.4) +
+          labs(y = "Survival post-isolation (days)", x = "") +
+          scale_fill_manual(values = treatment_cols)
+
+
+E<- (A+B)/(C+D)
+E
+ggsave("timing_birth_death.png", E, width = 10, height = 8, units = "in")
+
+```
+
+# Survival Curves
+```{r Survival Curves}
+
+library(survminer)
+
+require("survival")
+fit <- survfit(Surv(age_post_iso) ~ Treatment_Fine, data = grav_all)
+
+ggsurvplot(fit, data = grav_all, 
+           size = 1,                 # change line size
+  palette = c(  "#6B7280", "#9FD6CC", "#8C2F39","#2F6F6B"),# custom color palettes
+  conf.int = F,         # Add confidence interval # Risk table color by groups
+  xlab = "Survival post-isolation (days)",
+ legend.labs =   c("Unexposed", "Exposed (Local)", "Infected", "Exposed (Foreign)"), 
+ ggtheme = theme( axis.text.y = element_text(size = 15),
+                    axis.text.x = element_text(size = 15),
+                    axis.title.x = element_text(size = 18),
+                    axis.title.y = element_text(size = 18, angle =90, 
+                                                margin = margin(r = 15)))) 
+
+
+
+```
+
+
+```{r Clutch Timing Models}
+
+per_female_timing$Treatment_Fine <- fct_relevel(per_female_timing$Treatment_Fine, "UNEX")
+
+#Intra Clutch time
+#How many days to females hold clutches?
+#Summarized by female, could also do per/cluctch
+
+mean(per_female_timing$mean_holding_time)
+
+t1 <- 
+  per_female_timing %>%
+  glmmTMB(log(mean_holding_time+1) ~ Treatment_Fine  + (1|Stock), 
+                          family = gaussian, #gaussian, Gamma(link = "log")
+                         dispformula  = ~ Treatment_Fine, 
+                         # weights = max_clutches,
+                          #ziformula = ~Treatment_Fine,
+                          data = .)
+summary(t1)
+simusimulationOutput <- simulateResiduals(fittedModel = t1, plot = T)
+testDispersion(t1)
+
+### Inter Clutch time
+#TIME BETWEEN CLUTCHES
+
+per_female_timing$Treatment_Fine <- fct_relevel(per_female_timing$Treatment_Fine,
+                                              "UNEX") #"UNEX", "EXP_MER
+
+t2 <- glmmTMB(log(mean_time_between+1) ~ Treatment_Fine  + (1|Stock), 
+                          family = gaussian,
+                          dispformula  = ~ Treatment_Fine, 
+                          #ziformula = ~Treatment_Fine,
+                          data = per_female_timing)
+
+summary(t2)
+simusimulationOutput <- simulateResiduals(fittedModel = t2, plot = T)
+testDispersion(t2)
+testZeroInflation(t2)
+
+##############################
+# Fecundity Window (Oldest F1)
+
+per_female_timing$Treatment_Fine <- fct_relevel(per_female_timing$Treatment_Fine,
+                                              "UNEX") #"UNEX", "EXP_MER
+
+t3 <- glmmTMB(max_age_f1 ~ Treatment_Fine   + (1|Stock), #log(max_age_f1+1)
+                          family = nbinom1, #gaussian
+              #Gamma(link = "log")
+                          #dispformula  = ~ Treatment_Fine, 
+                          #weights = max_clutches,
+                          ziformula = ~1,
+                          data = per_female_timing)
+
+summary(t3)
+simusimulationOutput <- simulateResiduals(fittedModel = t3, plot = T)
+testDispersion(t3)
+testZeroInflation(t3)
+
+
+# Survival post isolation
+per_female_timing$Treatment_Fine <- fct_relevel(per_female_timing$Treatment_Fine,
+                                              "UNEX") #"UNEX", "EXP_MER
+
+t4 <- glmmTMB(log(max_age+1)  ~ Treatment_Fine  + (1|Stock), 
+                          family = gaussian,
+                          data = per_female_timing)
+
+
+summary(t4)
+simusimulationOutput <- simulateResiduals(fittedModel = t4, plot = T)
+testDispersion(t4)
+testZeroInflation(t4)
+
+
+```
+
+#F1 Survival
+(do that one nature paper survival filtering thing)
+
+**Note how the survival dynamics change across clutch number.** 
+Why are females still producing clutches (something that takes up a lot of energy and is surely costly in many other aspects as well (i.e. predation)) when the survival of her offspring ends up being so low?
+
+What's really interesting here is that we are seeing infected females continue to produce eggs (albeit at a much lower rate and for a much lesser time) with a close to 0 survival rate. This makes me think about mechanism. They are physically **able** to produce some eggs (sometimes, don't forget about ghost clutches), but really none of them survive. Maybe the worm is disrupting the allocation of yummy juicy stuff to eggs?
+
+```{r Nauplii: How are the babies surviving from eggs}
+
+#Proportion of hatching nauplii from eggs
+
+grav_all1 <- grav_all %>%
+  mutate( #Strain = fct_explicit_na(Strain, na_level = "None"),
+          Treatment_Fine = fct_recode( Treatment_Fine,
+                              "Unexposed" = "UNEX", "Infected" = "INF",
+                              "Exposed: Local" = "EXP_MER", "Exposed: Foreign" = "EXP_KJER"),
+           Treatment_Fine = fct_relevel( Treatment_Fine, c("Unexposed", "Infected")))
+
+grav_all1 %>%
+  filter(!prp_survival > 1) %>% #a couple of weird rows
+  ggplot(aes(x = as.factor(Clutch_Num), y = prp_survival, 
+             colour = Treatment_Fine)) +
+  annotate(geom = "rect", alpha = 0.3,
+            fill = "lightblue",
+           xmin = -Inf, xmax = 1.25, 
+           ymin = -Inf, ymax = Inf)+
+  geom_point(size = 2.5, alpha = 0.7)+
+  stat_summary(fun.data = mean_cl_boot,
+               colour = "black",
+               aes(group =Treatment_Fine),
+               geom= "pointrange")+
+    stat_summary(fun.data = mean_cl_boot,
+               colour = "black",
+               aes(group = Treatment_Fine),
+               linetype = "dashed",
+               geom= "line")+
+  facet_wrap(~Treatment_Fine)+ #, scales = "free_x"
+  labs( x = "Clutch number (n + 1)", 
+        y = "Proportion of nauplii hatching from clutch") +
+  scale_color_manual(values =  c( "#6B7280", "#8C2F39","#2F6F6B","#9FD6CC"))
+
+
+A<- 
+  grav_all1 %>%
+  filter(!Treatment_Fine %in% c("Unexposed", "Infected")) %>%
+  group_by(Clutch_Num, Treatment_Fine) %>%
+  filter(n() > 1) %>%        # <- drop singleton clutches
+  ungroup() %>%
+  ggplot(aes(x = as.factor(Clutch_Num), y = prp_survival, 
+             colour = Treatment_Fine)) +
+  annotate(geom = "rect", alpha = 0.3,
+            fill = "lightblue",
+           xmin = -Inf, xmax = 1.25, 
+           ymin = -Inf, ymax = Inf)+
+ # geom_point(size = 2.5, alpha = 0.4)+
+stat_smooth(method = "gam", 
+              aes(group = Treatment_Fine),
+              fullrange = F, 
+              se = F,
+              fill = "lightgrey",
+              formula = y ~ s(x, bs = "tp", k = 6))+
+    stat_summary(fun.data = mean_cl_boot,
+                 shape = 21, size = 0.7, 
+                 fill = "white",
+               aes(group =Treatment_Fine),
+               geom= "pointrange")+
+  ylim(0, 0.7)+
+  labs( x = "Clutch number (n + 1)", 
+        y = "Proportion of nauplii hatching from clutch") +
+  scale_color_manual(values =  c( "#2F6F6B","#9FD6CC")) 
+
+A
+ggsave("prp_acrossclutches.png", A, height = 6.5, width = 5, units = 
+         "in")
+
+#####
+#Lifetime nauplii Production
+#####
+
+grav_all %>%
+  ggplot(aes(x = Infection_Status, y = PostTreat_Nauplii_Ind, 
+             colour = Treatment_Fine)) +
+  geom_jitter(height = 0, width = 0.1, 
+              size = 4, alpha = 0.3) +
+  stat_summary(fun.data = mean_cl_boot, colour = "black", 
+               shape = 21, size = 1, stroke =1.5,
+               fill = "white") +
+  facet_wrap(~Strain, scales = "free_x")+
+  scale_color_manual(values = treatment_cols) +
+  labs(x = "", 
+       y = "Individual lifetime nauplii production
+  (count; -1st clutch, post-isolation)") +
+  theme(strip.text = element_text(size = 15),
+        axis.text.y = element_text(size = 15),
+        axis.text.x = element_text(size = 15),
+        axis.title.y = element_text(size = 18, angle =90, margin = margin(r = 15)),
+        strip.text.x = element_text(margin = margin(0.25,0,0.25,0, "cm")))
+
+
+
+grav_all %>%
+  ggplot(aes(x = Infection_Status, y = prp_survival_post, 
+             colour = Treatment_Fine)) +
+  geom_jitter(height = 0, width = 0.1, 
+              size = 4, alpha = 0.3) +
+  stat_summary(fun.data = mean_cl_boot, colour = "black", 
+               shape = 21, size = 1, stroke =1.5,
+               fill = "white") +
+  facet_wrap(~Strain, scales = "free_x")+
+  scale_color_manual(values = treatment_cols) +
+  labs(x = "", 
+       y = "Proportion of nauplii surviving") +
+  theme(strip.text = element_text(size = 15),
+        axis.text.y = element_text(size = 15),
+        axis.text.x = element_text(size = 15),
+        axis.title.y = element_text(size = 18, angle =90, margin = margin(r = 15)),
+        strip.text.x = element_text(margin = margin(0.25,0,0.25,0, "cm")))
+
+
+#### 
+
+grav_all$Treatment_Fine <- fct_relevel(grav_all$Treatment_Fine, c("UNEX", "INF"))
+
+#Number of nauplii survivng post-exposure
+grav_all%>%
+    ggplot(aes(x = Clutch_Tot, y = Maximum_Dens_post, 
+             colour = ifelse(Maximum_Dens_post > 0, Treatment_Fine, "Zero"))) +
+  geom_point(size = 5, alpha = 0.7)+
+  stat_smooth(method = "glm", 
+             # formula = y ~ s(x, bs = "tp", k = 2), 
+              colour = "black",
+              fullrange = F)+
+  facet_wrap(~Treatment_Fine)+ #, scales = "free_x"
+  coord_cartesian(y = c(0, max(grav_all$Maximum_Dens)),
+                  x = c(0, 70))+
+  labs(y = "Surviving nauplii 24-hrs post-hatch (count)", 
+       x =  "Total eggs per clutch (count)") +
+  scale_color_manual(values =  c( "#6B7280",  "#8C2F39", 
+                                  "#2F6F6B","#9FD6CC", "lightgrey"))
+
+
+```
+
+```{r Nauplii Numbers Models}
+
+#################
+## Lifetime Nauplii production #
+#################
+
+## HERE WE NEED 1 LINE PER FEMALE. THIS IS PSEUDO REPLICATION.
+grav_byfemale$Treatment_Fine <- fct_relevel(grav_byfemale$Treatment_Fine, 
+                                                  "EXP_KJER") #"EXP_MER", EXP_KJER"
+
+m3 <- 
+  grav_byfemale %>%
+  glmmTMB(PostTreat_Nauplii_Ind ~ Treatment_Fine  +
+                                   (1| Stock), 
+              #dispformula = ~ 1 ,
+               ziformula = ~1,
+              data = .,
+              family = nbinom1)
+
+summary(m3)
+simusimulationOutput <- simulateResiduals(fittedModel = m3, plot = T)
+testDispersion(m3)
+testZeroInflation(m3)
+
+
+#################
+## Proportion of nauplii hatching from clutches #
+## Surviving nauplii based on clutch tot
+#################
+
+grav_all$Treatment_Fine <- fct_relevel(grav_all$Treatment_Fine, "EXP_KJER")
+
+m4 <- grav_all %>%
+  filter(is_post) %>%   # keeps all females; uses only post-treatment clutch rows
+  mutate( failures = Clutch_Tot_post - Maximum_Dens_post ) %>%
+  filter(!is.na(Maximum_Dens_post), !is.na(Clutch_Tot_post), failures >= 0) %>%
+  glmmTMB(
+    cbind(Maximum_Dens_post, failures) ~ Treatment_Fine + Clutch_Num +
+                                          (1|Stock) + (1|ID),
+                                        ziformula = ~1,
+                                        family = betabinomial(link = "logit"),
+                                        data = . )
+
+
+simusimulationOutput <- simulateResiduals(fittedModel = m4, plot = T)
+summary(m4)
+testDispersion(m4)
+
+
+```
+
+### (Re) Plot from chunks above, but now they are in the same place which is cool 
+```{r MEGA PLOT: LIFETIME PRODUCTION OF LIFESTAGES}
+##########################
+# EGSS PER CLUTCH
+####################
+
+#Let's get this all leveled up in a cute way
+grav_all$Treatment_Fine <- fct_relevel(grav_all$Treatment_Fine, c("UNEX", "INF"))
+  
+A <- 
+  grav_all %>%
+  group_by(Treatment_Fine, Clutch_Num) %>%
+  mutate( mean_eggs_exp_clutch = mean(Clutch_Tot)) %>%
+  ggplot(aes(x = Clutch_Num, y = Clutch_Tot, 
+             colour = Treatment_Fine)) +
+    annotate(geom = "rect", alpha = 0.3,
+            fill = "lightblue",
+           xmin = -Inf, xmax = 1.5, 
+           ymin = -Inf, ymax = Inf)+
+  geom_jitter(height = 0, width = 0.00, size = 3,
+              alpha = 0.3)+
+  
+facet_wrap(~  Treatment_Fine )+ #Strain +
+geom_point(aes(x = Clutch_Num, y = mean_eggs_exp_clutch),
+             size = 3)+
+  stat_summary(geom = "pointrange", 
+               fun.data = mean_cl_boot,
+               colour = "black")+
+ geom_line(aes(x = Clutch_Num, 
+                y = mean_eggs_exp_clutch, 
+                group = 1), 
+            colour = "black", 
+            linetype = "dashed") +
+  xlab("Clutch number (n+1)")+
+  ylab("Total eggs per clutch (count)") +
+  scale_x_continuous(breaks = seq(0, 14, by = 2))+
+  scale_color_manual(values = treatment_cols) +
+  theme(axis.title.x =  element_text(margin = margin(t = 6)))
+
+A
+
+ggsave("eggs_per_clutch.png", A, width = 8, height = 7, units = "in")
+
+#######################################################
+
+grav_all <- grav_all %>%
+  mutate( Strain = fct_explicit_na(Strain, na_level = "None"),
+          Strain = fct_recode(Strain, "Local" = "MER", "Foreign" = "KJER"),
+          Strain = fct_relevel(Strain, c("None", "MER")))
+
+A<- 
+  grav_all %>%
+  ggplot(aes(x = Infection_Status, y = PostTreat_Eggs_Ind, 
+             colour = Treatment_Fine)) +
+  geom_jitter(height = 0, width = 0.1, 
+              size = 4, alpha = 0.3) +
+  stat_summary(fun.data = mean_cl_boot, colour = "black", 
+               shape = 21, size = 1, stroke =1.5,
+               fill = "white") +
+  facet_wrap(~Strain, scales = "free_x")+
+  scale_color_manual(values = treatment_cols) +
+  labs(x = "", 
+       y = "Individual lifetime egg production
+  (count, post-isolation)") +
+  theme(strip.text = element_text(size = 15),
+        axis.text.y = element_text(size = 15),
+        axis.text.x = element_text(size = 15),
+        axis.title.y = element_text(size = 17, angle =90, margin = margin(r = 15)),
+        strip.text.x = element_text(margin = margin(0.25,0,0.25,0, "cm"))) 
+
+
+
+B<-
+  grav_all %>%
+  ggplot(aes(x = Infection_Status, y = PostTreat_Nauplii_Ind, 
+             colour = Treatment_Fine)) +
+  geom_jitter(height = 0, width = 0.1, 
+              size = 4, alpha = 0.3) +
+  stat_summary(fun.data = mean_cl_boot, colour = "black", 
+               shape = 21, size = 1, stroke =1.5,
+               fill = "white") +
+  facet_wrap(~Strain, scales = "free_x")+
+  scale_color_manual(values = treatment_cols) +
+  labs(x = "", 
+       y = "Individual lifetime nauplii production
+  (count, post-isolation)") +
+  theme(strip.text = element_text(size = 15),
+        axis.text.y = element_text(size = 15),
+        axis.text.x = element_text(size = 15),
+        axis.title.y = element_text(size = 17, angle =90, margin = margin(r = 15)),
+        strip.text.x = element_text(margin = margin(0.25,0,0.25,0, "cm")))
+
+C<- A/B
+C
+
+ggsave("lifetime_production.png", C, width = 10, height = 14, units = "in")
+
+
+D<- 
+  grav_all %>%
+  ggplot(aes(x = Clutch_Num, y = prp_survival_post, colour = Treatment_Fine)) +
+  geom_jitter(height = 0, width = 0, size = 4, 
+              alpha = 0.1) +
+  stat_smooth(
+    method = "gam", fill = "lightgrey", fullrange = T, size = 1.5, 
+    formula = y ~ s(x, k = 6, bs = "tp"), se = TRUE) +
+  #facet_wrap(~Strain, scales = "free_x") +
+  scale_color_manual(values = treatment_cols) +
+  ylim(0, 1)+
+  scale_x_continuous(breaks = seq(0, 16, by =2)) +
+  labs(x = "Clutch number (n +1)", y = "Proportion of nauplii hatching from clutch") +
+  theme( 
+    strip.text = element_text(size = 15),
+    axis.text.y = element_text(size = 15),
+    axis.text.x = element_text(size = 15),
+    axis.title.x = element_text(size = 17),
+    axis.title.y = element_text(size = 17, angle = 90, margin = margin(r = 15)),
+    strip.text.x = element_text(margin = margin(0.25, 0, 0.25, 0, "cm")) ) 
+
+D
+
+ggsave("prp_survival.png", D, width = 5, height = 5, units = "in")
+
+
+########################
+### NAUPLII SURVIVAL POST-HATCH #
+####################
+
+grav_all$Treatment_Fine <- fct_relevel(grav_all$Treatment_Fine, c("UNEX", "INF"))
+
+#Number of nauplii survivng post-exposure
+A<- grav_all%>%
+    ggplot(aes(x = Clutch_Tot, y = Maximum_Dens_post, 
+             colour = ifelse(Maximum_Dens_post > 0, Treatment_Fine, "Zero"))) +
+  geom_point(size = 5, alpha = 0.7)+
+  stat_smooth(method = "glm", 
+             # formula = y ~ s(x, bs = "tp", k = 2), 
+              colour = "black",
+              fullrange = F)+
+  facet_wrap(~Treatment_Fine)+ #, scales = "free_x"
+  coord_cartesian(y = c(0, max(grav_all$Maximum_Dens)),
+                  x = c(0, 70))+
+  labs(y = "Surviving nauplii 24-hrs post-hatch (count)", 
+       x =  "Total eggs per clutch (count)") +
+  theme(axis.title.x =  element_text(margin = margin(t = 6)))+
+  scale_color_manual(values =  c( "#6B7280",  "#8C2F39", 
+                                  "#2F6F6B","#9FD6CC", "lightgrey"))
+
+A
+
+ggsave("castration.png", A, width = 8, height = 8, units = "in")
+
+
+
+```
+
+
+#Infection strain
+Local strain significantly higher intensity + higher infection burden
+```{r KJER vs MER infection prevalence/intensity + Treatment counts}
+
+############################
+## TREATMENT COUNTS ###
+############################
+
+grav_all %>%
+  filter(Infection_Status == "INF") %>%
+  group_by(ID, Strain) %>%
+  group_by(Strain) %>%
+  summarise( n = n_distinct(ID))
+
+grav_all %>%
+  filter(Infection_Status == "EXP") %>%
+  group_by(ID, Strain) %>%
+  group_by(Strain) %>%
+  summarise( n = n_distinct(ID))
+
+grav_all %>%
+  filter(Infection_Status == "UNEX") %>%
+  group_by(ID, Strain) %>%
+  group_by(Strain) %>%
+  summarise( n = n_distinct(ID))
+
+############################
+## INFECTION INTENSITY ###
+############################
+
+#Dose = 3; didnt count the infection intensity in everything, so the number isn't an exact match
+#Have to drop n = 19 animals because we didn't count infection intensity at the start
+grav_inf_intensity<-
+grav_all %>%
+  filter(Infection_Status == "INF") %>%
+  group_by(ID, Strain) %>%
+  summarise( Inf_Intensity = max(Inf_Intensity, na.rm = TRUE), 
+            .groups = "drop") 
+
+#Infection intensity
+ggplot(grav_inf_intensity, aes(x = Strain, y = as.numeric(Inf_Intensity))) +
+  geom_jitter(height = 0.05, width = 0.05 ) +
+  stat_summary(fun.data = mean_cl_boot, colour = "black", 
+               aes(group = Strain),
+               shape = 21, size = 1, stroke =1.5,
+               fill = "white") +
+  ylim(0, 2.5)+
+  labs(y = "Infection intensity ([#worms/infected host]))")
+
+
+grav_inf_intensity<-
+grav_all %>%
+  filter(!Infection_Status == "UNEX") %>%
+  group_by(ID, Strain) %>%
+  summarise( Inf_Intensity = max(Inf_Intensity, na.rm = TRUE)) 
+#Have to drop n = 19 animals because we didn't count infection intensity at the start
+
+#Given 3 coracidia exposure, what proportion of parasites were infective?
+#Note it is 34 (not 37) and 60 (not 82) because we did not record all infection intensities at the beginning.
+
+# We know that there are KJER = 9 infective worms, 37 exposed = 9/(34 X 3 coracidia) = 0.088
+# We know that there are MER = 52 infective worms (10 = 2 coracidia infection), 
+                              #44/( 60 X 3 coracidia) = 0.24
+
+#all
+A<- ggplot(grav_inf_intensity, aes(x = Strain, y = as.numeric(Inf_Intensity), 
+                               colour = Strain)) +
+  geom_jitter(height = 0.05, width = 0.05, size = 3, 
+              alpha = 0.7) +
+  stat_summary(fun.data = mean_cl_boot, colour = "black", 
+               aes(group = Strain),
+               shape = 21, size = 1, stroke =1.5,
+               fill = "white") +
+  scale_colour_manual(values = c("#2F6F6B", "#9FD6CC"))+
+  ylim(0, 2)+
+  labs(y = "Infection intensity (#worms/host))", x = "")
+
+A
+
+Q<- ggplot_build(A)
+############################
+## INFECTION PREVALENCE ###
+############################
+
+grav_prev_summary <- grav_all%>%
+  distinct(ID, Strain, Infection_Status) %>%
+  group_by(Strain) %>%
+  summarise(
+    n      = n(),                                # total females in that strain
+    n_inf  = sum(Infection_Status == "INF"),     # infected
+    n_exp  = sum(Infection_Status == "EXP"),     # exposed only
+    n_trials = n_inf + n_exp,
+    inf_prev = n_inf / n_trials,                 # prevalence
+    se_prev  = sqrt(inf_prev * (1 - inf_prev) / n_trials),  # binomial SE
+    .groups = "drop" )
+
+# quick plot
+B<- grav_prev_summary%>%
+drop_na() %>%
+ggplot(aes(x = Strain, y = inf_prev, colour = Strain)) +
+  geom_point(size = 5) +
+  geom_errorbar(
+    aes(ymin = inf_prev - se_prev, ymax = inf_prev + se_prev),
+    width = 0.2) +
+    scale_colour_manual(values = c("#2F6F6B", "#9FD6CC"))+
+  ylim(0,1) +
+  labs(y = "Infection prevalence, lab assay", x = "")
+
+C<- B/A
+
+C
+
+ggsave("PARAITE_prev_inten.png", C, height = 7 , width = 4, unit = "in")
+
+```
+
