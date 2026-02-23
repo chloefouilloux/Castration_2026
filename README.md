@@ -1,6 +1,10 @@
 Hello! Welcome to the wonderful world of copepods.
 Below is our readme for Fouilloux et al. 2026: ****From exposure to infection: divergent fitness consequences of parasite encounters in a trophically-transmitted system****
-The paper is about the outcomes of parasite interactions between a two genotypes of trophically-transmitted tapeworm (Schistocephalus solidus) and its first intermediate host, the cyclopoid copepod!
+The paper is about the outcomes of parasite interactions between a two genotypes of trophically-transmitted tapeworm (Schistocephalus solidus) and its first intermediate host, the cyclopoid copepod (here we use gravid females in order to get at fitness outcomes)!
+
+<img width="799" height="479" alt="Screenshot 2026-02-23 at 10 33 45" src="https://github.com/user-attachments/assets/b108c6b6-d123-44db-9679-705b1a570f6e" />
+
+## Variable definitions 
 
 | Variable                       | Type                  | Unit       | Definition                                                                                          |
 | ------------------------------ | --------------------- | ---------- | --------------------------------------------------------------------------------------------------- |
