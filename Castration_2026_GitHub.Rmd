@@ -316,7 +316,7 @@ grav_all %>%
 #1. Clutch size decreases across time
 
 #grav_all is not stable, neither is grav
-grav_all$Treatment_Fine <- fct_relevel(grav_all$Treatment_Fine, "UNEX") #"EXP_MER"
+grav_all$Treatment_Fine <- fct_relevel(grav_all$Treatment_Fine, "EXP_MER") #"EXP_MER", "UNEX"
 
 
 #okay, so i don't want to include the first clutch, but then all the females that do not even make another clutch are not counted?
@@ -519,16 +519,35 @@ fit <- survfit(Surv(age_post_iso) ~ Treatment_Fine, data = grav_all)
 
 ggsurvplot(fit, data = grav_all, 
            size = 1,                 # change line size
-  palette = c(  "#6B7280", "#9FD6CC", "#8C2F39","#2F6F6B"),# custom color palettes
+  palette = c(  "#6B7280","#8C2F39","#2F6F6B", "#9FD6CC"),# custom color palettes
   conf.int = F,         # Add confidence interval # Risk table color by groups
   xlab = "Survival post-isolation (days)",
- legend.labs =   c("Unexposed", "Exposed (Local)", "Infected", "Exposed (Foreign)"), 
+ legend.labs =   c("Unexposed",  "Infected", "Exposed (Allopatric)", "Exposed (Sympatric)"), 
  ggtheme = theme( axis.text.y = element_text(size = 15),
                     axis.text.x = element_text(size = 15),
                     axis.title.x = element_text(size = 18),
                     axis.title.y = element_text(size = 18, angle =90, 
                                                 margin = margin(r = 15)))) 
 
+
+#To assess the virulence of established infections, we next examined host survival as a function of infection status and intensity. 
+
+#Infected females exhibited reduced survival relative to uninfected individuals.
+
+#Stats on this
+survdiff(Surv(age_post_iso) ~ Treatment_Fine, data = grav_all)
+
+grav_all$Treatment_Fine<- fct_relevel(grav_all$Treatment_Fine, "EXP_KJER") #"EXP_MER", "UNEX"
+cox_model <- coxph(Surv(age_post_iso) ~ Treatment_Fine, data = grav_all)
+summary(cox_model)
+
+#Among infected hosts, survival declined with increasing parasite intensity, with females harbouring two parasites exhibiting shorter lifespans than those infected with a single parasite
+
+inf_fem <- grav_all %>% filter(Inf_Intensity >0) %>% 
+                        filter(!Strain == "None") %>% 
+                        mutate(Inf_Intensity = as.numeric(Inf_Intensity))
+
+coxph(Surv(age_post_iso) ~ Inf_Intensity , data = inf_fem)
 
 
 ```
@@ -560,7 +579,7 @@ testDispersion(t1)
 #TIME BETWEEN CLUTCHES
 
 per_female_timing$Treatment_Fine <- fct_relevel(per_female_timing$Treatment_Fine,
-                                              "UNEX") #"UNEX", "EXP_MER
+                                              "EXP_MER") #"UNEX", "EXP_MER
 
 t2 <- glmmTMB(log(mean_time_between+1) ~ Treatment_Fine  + (1|Stock), 
                           family = gaussian,
@@ -784,7 +803,8 @@ testZeroInflation(m3)
 ## Surviving nauplii based on clutch tot
 #################
 
-grav_all$Treatment_Fine <- fct_relevel(grav_all$Treatment_Fine, "EXP_KJER")
+grav_all$Treatment_Fine <- fct_relevel(grav_all$Treatment_Fine, "EXP_MER")
+#"EXP_KJER", "UNEX"
 
 m4 <- grav_all %>%
   filter(is_post) %>%   # keeps all females; uses only post-treatment clutch rows
@@ -949,13 +969,64 @@ A<- grav_all%>%
                   x = c(0, 70))+
   labs(y = "Surviving nauplii 24-hrs post-hatch (count)", 
        x =  "Total eggs per clutch (count)") +
-  theme(axis.title.x =  element_text(margin = margin(t = 6)))+
+  theme(
+      axis.text.y = element_text(size = 22),
+      axis.text.x = element_text(size = 22, margin = margin(t = 6))) +
   scale_color_manual(values =  c( "#6B7280",  "#8C2F39", 
                                   "#2F6F6B","#9FD6CC", "lightgrey"))
 
 A
 
 ggsave("castration.png", A, width = 8, height = 8, units = "in")
+
+
+
+
+#####
+## EGGS ACROSS TIME ###
+
+A<- 
+grav_all %>%
+  filter(!Treatment_Fine %in% c("INF")) %>%
+  ggplot(aes(x = Clutch_Num, y = Clutch_Tot, 
+             colour = Treatment_Fine)) +
+  annotate(geom = "rect", alpha = 0.3,
+           fill = "lightblue",
+           xmin = -Inf, xmax = 1.25, 
+           ymin = -Inf, ymax = Inf) +
+  # dashed GAM for UNEX only
+  stat_smooth(data = ~ subset(., Treatment_Fine == "UNEX"),
+              method = "gam",
+              aes(group = Treatment_Fine),
+              fullrange = F,
+              se = F,
+              linetype = "dashed",
+              formula = y ~ s(x, bs = "cr", k = 5)) +
+  # solid GAM for everyone except UNEX
+  stat_smooth(data = ~ subset(., Treatment_Fine != "UNEX"),
+              method = "gam",
+              aes(group = Treatment_Fine),
+              fullrange = F,
+              se = F,
+              linetype = "solid",
+              formula = y ~ s(x, bs = "cr", k = 5)) +
+  # pointrange for everyone except UNEX
+  stat_summary(data = ~ subset(., Treatment_Fine != "UNEX"),
+               fun.data = mean_cl_boot,
+               shape = 21, size = 0.7,
+               fill = "white",
+               aes(group = Treatment_Fine),
+               geom = "pointrange") +
+  theme(legend.position = "right",
+        axis.text.y = element_text(size = 22),
+        axis.text.x = element_text(size = 22)) +
+  labs(x = "", y = "") +
+  scale_x_continuous( breaks = seq(1, 14, by = 2))+
+  scale_color_manual(values = c("grey", "#9FD6CC", "#2F6F6B"))
+
+A
+
+ggsave("EXP_eggs.png", A, width = 6, height = 8, units = "in" )
 
 
 
